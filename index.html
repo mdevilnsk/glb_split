@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GLB Animation Editor</title>
+  <link rel="stylesheet" href="styles.css" />
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://esm.sh/three@0.160.0",
+      "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/",
+      "@gltf-transform/core": "https://esm.sh/@gltf-transform/core@4.1.1",
+      "@gltf-transform/extensions": "https://esm.sh/@gltf-transform/extensions@4.1.1",
+      "@gltf-transform/functions": "https://esm.sh/@gltf-transform/functions@4.1.1",
+      "jszip": "https://esm.sh/jszip@3.10.1"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- ============ 3D VIEWPORT ============ -->
+  <div id="viewport">
+    <div id="dropzone">
+      <div class="icon">📦</div>
+      <div class="label">Перетащите .glb файл сюда</div>
+      <div class="hint">или нажмите, чтобы выбрать</div>
+    </div>
+    <input type="file" id="fileInput" accept=".glb,.gltf" />
+  </div>
+
+  <!-- ============ RESIZER ============ -->
+  <div id="resizer"></div>
+
+  <!-- ============ SIDEBAR ============ -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h1>GLB Animation Editor</h1>
+      <p class="subtitle">Нарезка, просмотр и экспорт фрагментов · <kbd>Space</kbd> — воспроизведение</p>
+    </div>
+
+    <div class="sidebar-body">
+      <!-- Animations -->
+      <div class="section-title">Анимации</div>
+      <div id="animations"></div>
+
+      <!-- Timeline -->
+      <div class="timeline-container" id="timeline">
+        <div class="section-title">Таймлайн</div>
+        <div class="time-labels">
+          <span id="timeCurrent">0.00s</span>
+          <span class="sel-info">Выделение: <span id="selDuration">0.00s</span></span>
+          <span id="timeDuration">0.00s</span>
+        </div>
+
+        <div class="timeline-scroll" id="timelineScroll">
+          <div class="track" id="track">
+            <div class="ruler" id="ruler"></div>
+            <div class="segments-layer" id="segmentsLayer"></div>
+            <div class="selection" id="selection"></div>
+            <div class="handle handle-start" id="handleStart">
+              <div class="handle-bar"></div>
+              <div class="handle-grip"></div>
+            </div>
+            <div class="handle handle-end" id="handleEnd">
+              <div class="handle-bar"></div>
+              <div class="handle-grip"></div>
+            </div>
+            <div class="playhead" id="playhead"></div>
+          </div>
+        </div>
+
+        <div class="zoom-row">
+          <button class="zoom-btn" id="zoomOut" title="Уменьшить">−</button>
+          <input type="range" id="zoomRange" min="1" max="20" step="0.1" value="1" />
+          <button class="zoom-btn" id="zoomIn" title="Увеличить">+</button>
+          <span class="zoom-value" id="zoomValue">1.0x</span>
+          <button class="zoom-btn fit" id="zoomFit" title="Вписать в окно">Fit</button>
+        </div>
+
+        <div class="playback-row">
+          <button id="playBtn" class="primary">▶</button>
+          <div class="speed-control">
+            <label>Скорость</label>
+            <input type="range" id="speedRange" min="0.1" max="2" step="0.1" value="1" />
+            <span class="speed-value" id="speedValue">1.0x</span>
+          </div>
+        </div>
+
+        <!-- Segment editor -->
+        <div class="section-title">Добавить фрагмент</div>
+        <div class="segment-editor">
+          <div class="segment-inputs">
+            <input type="number" id="segStart" placeholder="Начало (с)" step="0.01" min="0" />
+            <input type="number" id="segEnd" placeholder="Конец (с)" step="0.01" min="0" />
+            <input type="text" id="segName" placeholder="Имя файла для экспорта" class="full-width" />
+          </div>
+          <button id="addSegmentBtn">+ Добавить фрагмент</button>
+        </div>
+
+        <div class="segment-presets-row">
+          <button id="exportSegmentsBtn" class="mini" title="Скачать JSON с фрагментами">⬇ Экспорт</button>
+          <button id="importSegmentsBtn" class="mini" title="Загрузить JSON с фрагментами">⬆ Импорт</button>
+          <button id="clearSegmentsBtn" class="mini danger" title="Удалить все фрагменты">✕ Очистить</button>
+        </div>
+        <input type="file" id="importSegmentsInput" accept=".json,application/json" style="display:none" />
+
+        <div class="section-title">Фрагменты (<span id="segmentsCount">0</span>)</div>
+        <div class="segments-list" id="segmentsList">
+          <div class="empty-hint">Нет добавленных фрагментов</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer actions -->
+    <div class="sidebar-footer">
+      <div class="actions">
+        <button id="exportBtn" disabled>Экспортировать все в ZIP</button>
+        <button class="secondary" id="clearBtn">Сбросить файл</button>
+      </div>
+      <div id="status"></div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
