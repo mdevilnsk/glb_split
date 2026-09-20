@@ -266,9 +266,10 @@ function preflightValidateDocument(doc) {
             const timesCount = input.getCount();
             const valuesCount = output.getCount();
 
-            if (!times || timesCount < 2) {
-                throw new Error(`"${name}", канал #${ci}: меньше 2 keyframes`);
+            if (!times || timesCount < 1) {
+                throw new Error(`"${name}", канал #${ci}: пустой input accessor (0 keyframes)`);
             }
+            // 1 keyframe — валидно для константных каналов, обработается в trimAnimation
             if (!values) {
                 throw new Error(`"${name}", канал #${ci}: нет значений`);
             }
@@ -1167,9 +1168,11 @@ exportBtn.addEventListener('click', async () => {
                     const i = s.getInput();
                     const o = s.getOutput();
                     if (!i || !o) throw new Error(`Сегмент "${seg.name}": sampler без input/output`);
-                    if (i.getCount() < 2) {
-                        throw new Error(`Сегмент "${seg.name}": < 2 keyframes (glTF требует минимум 2)`);
+                    if (i.getCount() < 1) {
+                        throw new Error(`Сегмент "${seg.name}": пустой input accessor`);
                     }
+                    // 1 keyframe допустим по факту (некоторые движки играют как статическую позу)
+                    // Наш trimAnimation должен был продублировать, но на всякий случай не падаем
                     const comps = o.getElementSize();
                     const expected = i.getCount() * comps;
                     if (o.getCount() !== expected) {
@@ -1211,13 +1214,17 @@ async function trimAnimation(doc, gltfAnim, startTime, endTime) {
     const newDuration = Math.max(1e-3, endTime - startTime);
     const root = doc.getRoot();
 
-    // Общий буфер для новых accessors (если его нет — создаём)
     let buffer = root.listBuffers()[0];
     if (!buffer) buffer = doc.createBuffer();
+
+    // Обрабатываем каждый УНИКАЛЬНЫЙ sampler ровно один раз
+    const processedSamplers = new Set();
 
     for (const channel of channels) {
         const sampler = channel.getSampler();
         if (!sampler) continue;
+        if (processedSamplers.has(sampler)) continue;
+        processedSamplers.add(sampler);
 
         const interp = sampler.getInterpolation() || 'LINEAR';
         const inputAcc = sampler.getInput();
@@ -1231,13 +1238,13 @@ async function trimAnimation(doc, gltfAnim, startTime, endTime) {
         const valuesPerKey = isCubic ? components * 3 : components;
         const valueOffset = isCubic ? components : 0;
 
-        // 1. Собираем индексы keyframes, попадающих в [startTime, endTime]
+        // 1. Собираем индексы keyframes в диапазоне
         const kept = [];
         for (let i = 0; i < times.length; i++) {
             if (times[i] >= startTime && times[i] <= endTime) kept.push(i);
         }
 
-        // 2. Fallback: если ничего не попало — берём ближайший keyframe
+        // 2. Fallback: если ничего не попало — ближайший
         if (kept.length === 0) {
             let closest = 0, minD = Infinity;
             for (let i = 0; i < times.length; i++) {
@@ -1246,8 +1253,11 @@ async function trimAnimation(doc, gltfAnim, startTime, endTime) {
             }
             kept.push(closest);
         }
-        // 3. Гарантируем МИНИМУМ 2 keyframe (требование glTF-спек)
-        if (kept.length === 1) kept.push(kept[0]);
+
+        // 3. Гарантируем МИНИМУМ 2 keyframe (glTF требует)
+        if (kept.length === 1) {
+            kept.push(kept[0]);
+        }
         kept.sort((a, b) => a - b);
 
         // 4. Формируем новые массивы
@@ -1255,7 +1265,6 @@ async function trimAnimation(doc, gltfAnim, startTime, endTime) {
         const newValues = [];
         for (const idx of kept) {
             let t = times[idx] - startTime;
-            // Clamp — важно для корректной duration
             t = Math.max(0, Math.min(newDuration, t));
             newTimes.push(t);
             const base = idx * valuesPerKey + valueOffset;
@@ -1264,18 +1273,15 @@ async function trimAnimation(doc, gltfAnim, startTime, endTime) {
             }
         }
 
-        // 5. Строгая монотонность (защита от дубликатов времени)
+        // 5. Строгая монотонность
         for (let i = 1; i < newTimes.length; i++) {
             if (newTimes[i] <= newTimes[i - 1]) {
                 newTimes[i] = newTimes[i - 1] + 1e-4;
             }
-        }
-        // И следим, чтобы не вылезти за newDuration после сдвига
-        for (let i = 0; i < newTimes.length; i++) {
             if (newTimes[i] > newDuration) newTimes[i] = newDuration;
         }
 
-        // 6. Нормализация кватернионов для rotation-каналов
+        // 6. Нормализация кватернионов
         if (channel.getTargetPath() === 'rotation' && components === 4) {
             for (let i = 0; i < newValues.length; i += 4) {
                 const x = newValues[i], y = newValues[i + 1], z = newValues[i + 2], w = newValues[i + 3];
@@ -1291,7 +1297,7 @@ async function trimAnimation(doc, gltfAnim, startTime, endTime) {
             }
         }
 
-        // 7. Санитизация — никаких NaN/Infinity
+        // 7. Санитизация
         for (let i = 0; i < newTimes.length; i++) {
             if (!isFinite(newTimes[i])) newTimes[i] = i * 0.033;
         }
@@ -1299,7 +1305,7 @@ async function trimAnimation(doc, gltfAnim, startTime, endTime) {
             if (!isFinite(newValues[i])) newValues[i] = 0;
         }
 
-        // 8. СОЗДАЁМ НОВЫЕ accessors и sampler (не трогаем существующие!)
+        // 8. СОЗДАЁМ новые accessors...
         const newInput = doc.createAccessor()
             .setType('SCALAR')
             .setArray(new Float32Array(newTimes))
@@ -1310,15 +1316,14 @@ async function trimAnimation(doc, gltfAnim, startTime, endTime) {
             .setArray(new Float32Array(newValues))
             .setBuffer(buffer);
 
-        const newSampler = doc.createAnimationSampler()
+        // 9. ...и МУТИРУЕМ существующий sampler.
+        //    Канал остаётся привязан к тому же объекту, ничего не теряется при сериализации.
+        sampler
             .setInput(newInput)
             .setOutput(newOutput)
             .setInterpolation('LINEAR');
-
-        channel.setSampler(newSampler);
     }
 
-    // Обновляем duration анимации
     if (typeof gltfAnim.setDuration === 'function') {
         gltfAnim.setDuration(newDuration);
     }
