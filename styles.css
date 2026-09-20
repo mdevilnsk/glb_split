@@ -832,11 +832,11 @@ kbd {
 }
 .tutorial-spotlight {
   position: fixed;
-  border-radius: 10px;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.75);
-  border: 2px solid #7c5cff;
-  transition: all 0.25s ease;
   pointer-events: none;
+  transition: left 0.25s ease, top 0.25s ease,
+              width 0.25s ease, height 0.25s ease;
+  /* box-shadow формирует затемнение вокруг вырезанной области */
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.78);
   background: transparent;
 }
 .tutorial-tooltip {
@@ -850,6 +850,7 @@ kbd {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
   pointer-events: auto;
   transition: left 0.2s ease, top 0.2s ease;
+  z-index: 1;
 }
 .tutorial-tooltip.centered {
   left: 50% !important;
@@ -862,8 +863,7 @@ kbd {
   margin-bottom: 10px;
 }
 #tutStepCounter {
-  font-size: 11px; color: #6b7280; font-family: monospace;
-  font-weight: 600;
+  font-size: 11px; color: #6b7280; font-family: monospace; font-weight: 600;
 }
 .tutorial-close {
   background: transparent; border: none;

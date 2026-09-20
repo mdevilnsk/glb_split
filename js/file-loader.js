@@ -11,6 +11,7 @@ import { state, dom } from './state.js';
 import { scene, camera, controls } from './three-scene.js';
 import { setStatus, validateClip, parseWithTimeout, disposeScene3D } from './utils.js';
 import { renderAnimations, applyZoom } from './timeline-core.js';
+import { onFileLoaded } from './tutorial.js';
 
 // ---------------------------------------------------------------------------
 // Очистка текущей модели
@@ -182,6 +183,8 @@ export async function loadFile(file) {
     let msg = `Загружено: ${file.name} · анимаций: ${state.animations.length}`;
     if (skipped.length > 0) msg += ` · пропущено: ${skipped.length}`;
     setStatus(skipped.length > 0 ? 'info' : 'success', msg);
+    
+    onFileLoaded(); // ← НОВОЕ: триггерим часть 2 туториала
   } catch (err) {
     console.error('Load error:', err);
     cleanupCurrentModel();
