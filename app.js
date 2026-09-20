@@ -354,6 +354,10 @@ function updatePlayheadUI() {
 }
 
 // ============ DRAG LOGIC ============
+// ============ DRAG LOGIC ============
+const snapLine = document.getElementById('snapLine');
+const SNAP_THRESHOLD_PX = 10; // Пиксельный порог «магнита»
+
 handleStart.addEventListener('mousedown', (e) => {
   e.stopPropagation();
   dragTarget = 'start';
@@ -387,24 +391,30 @@ track.addEventListener('mousedown', (e) => {
 window.addEventListener('mousemove', (e) => {
   if (!dragTarget) return;
 
+  // Авто-скролл у краёв
   const scrollRect = timelineScroll.getBoundingClientRect();
   if (e.clientX > scrollRect.right - 30) timelineScroll.scrollLeft += 12;
   else if (e.clientX < scrollRect.left + 30) timelineScroll.scrollLeft -= 12;
 
-  const t = xToTime(e.clientX);
+  const rawTime = xToTime(e.clientX);
 
   if (dragTarget === 'start') {
     const maxT = parseFloat(segEnd.value);
-    const newStart = Math.max(0, Math.min(t, maxT - 0.001));
-    segStart.value = newStart.toFixed(3);
+    const snap = snapTime(rawTime, getSnapCandidates());
+    const snapped = Math.max(0, Math.min(snap.time, maxT - 0.001));
+    segStart.value = snapped.toFixed(3);
     updateSelectionUI();
+    showSnapLine(snap.snapped, snapped);
   } else if (dragTarget === 'end') {
     const minT = parseFloat(segStart.value);
-    const newEnd = Math.min(currentClip.duration, Math.max(t, minT + 0.001));
-    segEnd.value = newEnd.toFixed(3);
+    const snap = snapTime(rawTime, getSnapCandidates());
+    const snapped = Math.min(currentClip.duration, Math.max(snap.time, minT + 0.001));
+    segEnd.value = snapped.toFixed(3);
     updateSelectionUI();
+    showSnapLine(snap.snapped, snapped);
   } else if (dragTarget === 'playhead') {
-    updatePlayhead(t);
+    updatePlayhead(rawTime);
+    hideSnapLine();
   }
 });
 
@@ -414,8 +424,69 @@ window.addEventListener('mouseup', () => {
     isScrubbing = false;
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
+    hideSnapLine();
   }
 });
+
+// ============ SNAPPING ============
+function getSnapCandidates() {
+  const candidates = [];
+  if (!currentClip) return candidates;
+
+  // 1. Playhead (главная цель)
+  if (currentAction) candidates.push(currentAction.time);
+
+  // 2. Края анимации
+  candidates.push(0);
+  candidates.push(currentClip.duration);
+
+  // 3. Границы других фрагментов
+  for (const seg of segments) {
+    candidates.push(seg.start);
+    candidates.push(seg.end);
+  }
+
+  return candidates;
+}
+
+function snapTime(time, candidates) {
+  if (!currentClip || candidates.length === 0) {
+    return { time, snapped: false };
+  }
+
+  // Порог в пикселях → переводим в секунды под текущий зум
+  const pxPerSecond = track.clientWidth / currentClip.duration;
+  const thresholdTime = SNAP_THRESHOLD_PX / pxPerSecond;
+
+  let bestTime = time;
+  let bestDist = thresholdTime;
+  let snapped = false;
+
+  for (const c of candidates) {
+    const dist = Math.abs(c - time);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestTime = c;
+      snapped = true;
+    }
+  }
+
+  return { time: bestTime, snapped };
+}
+
+function showSnapLine(visible, time) {
+  if (!visible || !currentClip) {
+    hideSnapLine();
+    return;
+  }
+  const pct = (time / currentClip.duration) * 100;
+  snapLine.style.left = `${pct}%`;
+  snapLine.classList.add('visible');
+}
+
+function hideSnapLine() {
+  snapLine.classList.remove('visible');
+}
 
 // ============ SELECTION UI ============
 function updateSelectionUI() {
