@@ -74,6 +74,7 @@ export const dom = {
 
   // Actions
   exportBtn:          document.getElementById('exportBtn'),
+  exportModelBtn:     document.getElementById('exportModelBtn'),
   clearBtn:           document.getElementById('clearBtn'),
   statusEl:           document.getElementById('status'),
 };

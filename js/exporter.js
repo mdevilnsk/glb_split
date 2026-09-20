@@ -222,8 +222,76 @@ async function handleExport() {
 }
 
 // ---------------------------------------------------------------------------
+// Экспорт модели без анимаций (со скелетом и скином)
+// ---------------------------------------------------------------------------
+async function handleExportModel() {
+  if (!state.currentDocument) return;
+
+  dom.exportModelBtn.disabled = true;
+  const originalText = dom.exportModelBtn.textContent;
+  dom.exportModelBtn.textContent = 'Готовлю модель...';
+  setStatus('info', 'Убираю анимации...');
+
+  try {
+    const io = new WebIO().registerExtensions(KHRONOS_EXTENSIONS);
+
+    // Сериализуем оригинал, потом читаем — так получаем независимую копию
+    const originalBuffer = await io.writeBinary(state.currentDocument);
+    const cloned = await io.readBinary(originalBuffer);
+    const root = cloned.getRoot();
+
+    // Удаляем ТОЛЬКО анимации. Скелет (Skin + Nodes), меши, материалы,
+    // текстуры — всё остаётся на месте.
+    const anims = root.listAnimations();
+    const removedCount = anims.length;
+    for (const a of anims) {
+      a.dispose();
+    }
+
+    if (removedCount === 0) {
+      setStatus('info', 'В файле не было анимаций — скачиваю как есть');
+    }
+
+    const glbBuffer = await io.writeBinary(cloned);
+
+    // Верификация: файл читается, скелет остался
+    const verify = await io.readBinary(glbBuffer);
+    const vRoot = verify.getRoot();
+    const vSkins = vRoot.listSkins();
+    const vMeshes = vRoot.listMeshes();
+    const vAnims = vRoot.listAnimations();
+
+    if (vMeshes.length === 0) {
+      throw new Error('После обработки в файле не осталось мешей');
+    }
+    if (vAnims.length > 0) {
+      throw new Error(`После обработки остались анимации: ${vAnims.length}`);
+    }
+
+    const baseName = state.currentFileName.replace(/\.(glb|gltf)$/i, '') || 'model';
+    const filename = `${baseName}_no_anim.glb`;
+
+    downloadBlob(new Blob([glbBuffer], { type: 'model/gltf-binary' }), filename);
+
+    let msg = `Готово! ${filename}`;
+    msg += ` · мешей: ${vMeshes.length}`;
+    if (vSkins.length > 0) msg += ` · скелетов: ${vSkins.length}`;
+    msg += ` · удалено анимаций: ${removedCount}`;
+    setStatus('success', msg);
+  } catch (err) {
+    console.error(err);
+    setStatus('error', 'Ошибка экспорта модели: ' + err.message);
+  } finally {
+    dom.exportModelBtn.disabled = false;
+    dom.exportModelBtn.textContent = originalText;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
+
 export function setupExporter() {
   dom.exportBtn.addEventListener('click', handleExport);
+  dom.exportModelBtn.addEventListener('click', handleExportModel);
 }

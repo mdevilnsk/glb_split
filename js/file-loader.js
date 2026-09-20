@@ -176,6 +176,7 @@ export async function loadFile(file) {
     renderAnimations();
     dom.timelineEl.classList.add('visible');
     dom.exportBtn.disabled = false;
+    dom.exportModelBtn.disabled = false;
     dom.dropzone.style.display = 'none';
 
     let msg = `Загружено: ${file.name} · анимаций: ${state.animations.length}`;
@@ -191,6 +192,7 @@ export async function loadFile(file) {
     dom.segmentsLayer.innerHTML = '';
     dom.segmentsCount.textContent = '0';
     dom.exportBtn.disabled = true;
+    dom.exportModelBtn.disabled = true;
     dom.dropzone.style.display = 'flex';
     setStatus('error', `Ошибка загрузки: ${err.message}`);
   } finally {
@@ -214,6 +216,7 @@ function resetApp() {
   state.zoom = 1;
   applyZoom(1);
   dom.exportBtn.disabled = true;
+  dom.exportModelBtn.disabled = true;
   dom.dropzone.style.display = 'flex';
   dom.statusEl.classList.remove('visible');
 }
