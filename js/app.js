@@ -9,6 +9,7 @@ import { setupPlayback, tickPlayback } from './playback.js';
 import { setupTimeline } from './timeline.js';
 import { setupSegments } from './segments.js';
 import { setupExporter } from './exporter.js';
+import { showTutorial, maybeShowTutorialOnFirstLaunch } from './tutorial.js';
 
 // --- Setup всех модулей ---
 setupResizer();
@@ -17,6 +18,8 @@ setupPlayback();
 setupTimeline();
 setupSegments();
 setupExporter();
+document.getElementById('helpBtn').addEventListener('click', showTutorial);
+maybeShowTutorialOnFirstLaunch();
 
 // --- Главный цикл ---
 function animate() {
