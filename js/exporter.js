@@ -128,19 +128,29 @@ function verifyExportedBuffer(doc, segmentName) {
   for (const a of anims) {
     const channels = a.listChannels();
     if (channels.length === 0) throw new Error(`Сегмент "${segmentName}": анимация без каналов`);
+
     for (const ch of channels) {
       const s = ch.getSampler();
       if (!s) throw new Error(`Сегмент "${segmentName}": канал без sampler`);
+
       const i = s.getInput();
       const o = s.getOutput();
       if (!i || !o) throw new Error(`Сегмент "${segmentName}": sampler без input/output`);
-      if (i.getCount() < 1) throw new Error(`Сегмент "${segmentName}": пустой input`);
-      const expected = i.getCount() * o.getElementSize();
-      if (o.getCount() !== expected) {
+
+      const tCount = i.getCount();            // сколько keyframes
+      const vCount = o.getCount();            // сколько элементов (vec3/vec4/scalar)
+      if (tCount < 1) throw new Error(`Сегмент "${segmentName}": пустой input`);
+      if (vCount < 1) throw new Error(`Сегмент "${segmentName}": пустой output`);
+
+      // Для CUBICSPLINE на каждый keyframe приходится 3 элемента (in/value/out)
+      const interp = s.getInterpolation() || 'LINEAR';
+      const expected = tCount * (interp === 'CUBICSPLINE' ? 3 : 1);
+
+      if (vCount !== expected) {
         throw new Error(
           `Сегмент "${segmentName}": несоответствие размеров ` +
-          `(keyframes: ${i.getCount()}, components: ${o.getElementSize()}, ` +
-          `ожидалось ${expected}, получено ${o.getCount()})`
+          `(интерполяция: ${interp}, keyframes: ${tCount}, ` +
+          `ожидалось элементов: ${expected}, получено: ${vCount})`
         );
       }
     }
