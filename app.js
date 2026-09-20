@@ -171,34 +171,233 @@ fileInput.addEventListener('change', (e) => {
   if (e.target.files[0]) loadFile(e.target.files[0]);
 });
 
+// ============ STATE ============
+let isLoading = false;
+
+// ============ RESOURCE CLEANUP ============
+function disposeScene3D(sceneObj) {
+  if (!sceneObj) return;
+  sceneObj.traverse((obj) => {
+    if (obj.geometry) {
+      try { obj.geometry.dispose(); } catch (_) {}
+    }
+    if (obj.material) {
+      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of materials) {
+        for (const key of Object.keys(mat)) {
+          const val = mat[key];
+          if (val && typeof val === 'object' && val.isTexture) {
+            try { val.dispose(); } catch (_) {}
+          }
+        }
+        try { mat.dispose(); } catch (_) {}
+      }
+    }
+  });
+}
+
+function cleanupCurrentModel() {
+  // Останавливаем миксер и все экшены
+  if (mixer) {
+    try {
+      mixer.stopAllAction();
+      if (modelScene) mixer.uncacheRoot(modelScene);
+    } catch (_) {}
+    mixer = null;
+  }
+  if (currentAction) {
+    try { currentAction.stop(); } catch (_) {}
+    currentAction = null;
+  }
+  currentClip = null;
+
+  // Убираем и уничтожаем сцену модели
+  if (modelScene) {
+    scene.remove(modelScene);
+    disposeScene3D(modelScene);
+    modelScene = null;
+  }
+
+  // Уничтожаем документ gltf-transform
+  if (currentDocument) {
+    try { currentDocument = null; } catch (_) {}
+  }
+
+  animations = [];
+
+  // Принудительно просим сборщик мусора (браузер может проигнорировать)
+  if (window.gc) {
+    try { window.gc(); } catch (_) {}
+  }
+}
+
+// ============ PREFLIGHT VALIDATION (gltf-transform) ============
+function preflightValidateDocument(doc) {
+  const root = doc.getRoot();
+  const anims = root.listAnimations();
+
+  if (anims.length === 0) {
+    throw new Error('В файле нет анимаций');
+  }
+
+  for (const anim of anims) {
+    const name = anim.getName() || 'unnamed';
+    const channels = anim.listChannels();
+
+    if (channels.length === 0) {
+      throw new Error(`Анимация "${name}" не содержит каналов`);
+    }
+
+    for (let ci = 0; ci < channels.length; ci++) {
+      const channel = channels[ci];
+      const sampler = channel.getSampler();
+      if (!sampler) continue;
+
+      const interp = sampler.getInterpolation() || 'LINEAR';
+      const input = sampler.getInput();
+      const output = sampler.getOutput();
+
+      if (!input || !output) {
+        throw new Error(`"${name}", канал #${ci}: отсутствует input/output accessor`);
+      }
+
+      const times = input.getArray();
+      const values = output.getArray();
+      const timesCount = input.getCount();
+      const valuesCount = output.getCount();
+
+      if (!times || timesCount < 2) {
+        throw new Error(`"${name}", канал #${ci}: меньше 2 keyframes`);
+      }
+      if (!values) {
+        throw new Error(`"${name}", канал #${ci}: нет значений`);
+      }
+
+      const comps = output.getElementSize();
+      const expectedCount = timesCount * (interp === 'CUBICSPLINE' ? 3 : 1);
+
+      if (valuesCount !== expectedCount) {
+        throw new Error(
+          `"${name}", канал #${ci}: несоответствие данных. ` +
+          `Интерполяция: ${interp}, keyframes: ${timesCount}, ` +
+          `ожидалось ${expectedCount} элементов, получено ${valuesCount}`
+        );
+      }
+
+      // Выборочная проверка на NaN/Infinity (не проходим по всем, чтобы не зависнуть)
+      const tStep = Math.max(1, Math.floor(timesCount / 100));
+      for (let i = 0; i < timesCount; i += tStep) {
+        if (!isFinite(times[i])) {
+          throw new Error(`"${name}", канал #${ci}: NaN/Infinity в times[${i}]`);
+        }
+      }
+      const vStep = Math.max(1, Math.floor(valuesCount / 200));
+      for (let i = 0; i < valuesCount; i += vStep) {
+        if (!isFinite(values[i])) {
+          throw new Error(`"${name}", канал #${ci}: NaN/Infinity в values[${i}]`);
+        }
+      }
+
+      // Проверка монотонности times
+      let lastT = -Infinity;
+      for (let i = 0; i < timesCount; i++) {
+        if (times[i] < lastT) {
+          throw new Error(`"${name}", канал #${ci}: times не монотонны на позиции ${i}`);
+        }
+        lastT = times[i];
+      }
+    }
+  }
+}
+
+// ============ PARSE WITH TIMEOUT ============
+function parseWithTimeout(loader, buffer, path, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(
+        `Парсинг превысил ${timeoutMs / 1000} сек. ` +
+        `Файл повреждён или содержит аномально большой объём данных.`
+      ));
+    }, timeoutMs);
+
+    loader.parseAsync(buffer, path)
+      .then((gltf) => {
+        if (settled) {
+          // Поздний ответ — сразу уничтожаем результат
+          try { disposeScene3D(gltf.scene); } catch (_) {}
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(gltf);
+      })
+      .catch((err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
 // ============ LOAD FILE ============
 async function loadFile(file) {
+  if (isLoading) {
+    setStatus('info', 'Уже загружается другой файл...');
+    return;
+  }
+
   if (!file.name.match(/\.(glb|gltf)$/i)) {
     return setStatus('error', 'Только .glb или .gltf');
   }
 
-    // Проверка размера — предотвращаем подвисание браузера
   const sizeMB = file.size / (1024 * 1024);
   if (sizeMB > 80) {
     const ok = confirm(
       `Файл весит ${sizeMB.toFixed(0)} МБ.\n\n` +
-      `Парсинг такого файла может занять много памяти и времени. ` +
-      `Продолжить?`
+      `Парсинг может занять много памяти. Продолжить?`
     );
     if (!ok) return;
   }
 
+  isLoading = true;
   currentFileName = file.name;
-  setStatus('info', 'Загружаю...');
+
+  // Очищаем предыдущую модель ДО начала работы
+  cleanupCurrentModel();
+  segments = [];
+  animationsEl.innerHTML = '';
+  timelineEl.classList.remove('visible');
+  segmentsList.innerHTML = '';
+  segmentsLayer.innerHTML = '';
+  segmentsCount.textContent = '0';
+  exportBtn.disabled = true;
+
+  setStatus('info', `Читаю файл (${sizeMB.toFixed(1)} МБ)...`);
 
   try {
-    const buffer = new Uint8Array(await file.arrayBuffer());
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = new Uint8Array(arrayBuffer);
+
+    // ---------- ЭТАП 1: парсинг через gltf-transform ----------
+    setStatus('info', 'Анализ структуры...');
     const io = new WebIO().registerExtensions(KHRONOS_EXTENSIONS);
     currentDocument = await io.readBinary(buffer);
 
+    // ---------- ЭТАП 2: preflight-валидация ----------
+    setStatus('info', 'Проверка анимаций...');
+    preflightValidateDocument(currentDocument);
+
+    // ---------- ЭТАП 3: парсинг через Three.js с таймаутом ----------
+    setStatus('info', 'Парсинг геометрии (может занять до 30 сек)...');
     const loader = new GLTFLoader();
-    const gltf = await loader.parseAsync(buffer.buffer, '');
-    if (modelScene) scene.remove(modelScene);
+    const gltf = await parseWithTimeout(loader, arrayBuffer, '', 30000);
+
+    // ---------- ЭТАП 4: добавляем модель в сцену ----------
     modelScene = gltf.scene;
     scene.add(modelScene);
 
@@ -209,20 +408,52 @@ async function loadFile(file) {
     camera.position.copy(center).add(new THREE.Vector3(0, size.y, size.z * 2));
     controls.update();
 
-    animations = gltf.animations;
-    mixer = new THREE.AnimationMixer(modelScene);
-    segments = [];
+    // ---------- ЭТАП 5: валидация клипов Three.js ----------
+    animations = [];
+    const skipped = [];
+    for (const clip of gltf.animations) {
+      try {
+        validateClip(clip);
+        animations.push(clip);
+      } catch (err) {
+        console.warn(`Пропущена анимация "${clip.name}":`, err.message);
+        skipped.push(`${clip.name}: ${err.message}`);
+      }
+    }
 
-    if (animations.length === 0) return setStatus('error', 'Нет анимаций.');
+    if (animations.length === 0) {
+      throw new Error(
+        'Все анимации невалидны. ' + (skipped.length > 0 ? `Первая ошибка: ${skipped[0]}` : '')
+      );
+    }
+
+    mixer = new THREE.AnimationMixer(modelScene);
 
     renderAnimations();
     timelineEl.classList.add('visible');
     exportBtn.disabled = false;
     dropzone.style.display = 'none';
-    setStatus('success', `Загружено: ${file.name}`);
+
+    let msg = `Загружено: ${file.name} · анимаций: ${animations.length}`;
+    if (skipped.length > 0) msg += ` · пропущено: ${skipped.length}`;
+    setStatus(skipped.length > 0 ? 'info' : 'success', msg);
   } catch (err) {
-    console.error(err);
-    setStatus('error', 'Ошибка: ' + err.message);
+    console.error('Load error:', err);
+
+    // ПОЛНАЯ ОЧИСТКА
+    cleanupCurrentModel();
+    segments = [];
+    animationsEl.innerHTML = '';
+    timelineEl.classList.remove('visible');
+    segmentsList.innerHTML = '';
+    segmentsLayer.innerHTML = '';
+    segmentsCount.textContent = '0';
+    exportBtn.disabled = true;
+    dropzone.style.display = 'flex';
+
+    setStatus('error', `Ошибка загрузки: ${err.message}`);
+  } finally {
+    isLoading = false;
   }
 }
 
@@ -252,16 +483,11 @@ function renderAnimations() {
 }
 
 function selectAnimation(index) {
-  currentClip = animations[index];
-
-  try {
-    validateClip(currentClip);
-  } catch (err) {
-    console.error('Невалидный клип:', err);
-    setStatus('error', `Анимация повреждена: ${err.message}`);
+  if (!animations[index]) {
+    setStatus('error', 'Анимация не найдена');
     return;
   }
-  
+  currentClip = animations[index];
   if (currentAction) currentAction.stop();
   currentAction = mixer.clipAction(currentClip);
   currentAction.setLoop(THREE.LoopOnce, 1);
@@ -281,7 +507,6 @@ function selectAnimation(index) {
   zoom = 1;
   zoomRange.value = 1;
   updateZoomUI();
-
   renderSegments();
   updateSelectionUI();
   updatePlayhead(0);
@@ -1116,10 +1341,10 @@ function setStatus(type, message) {
 function validateClip(clip) {
   if (!clip) throw new Error('Клип отсутствует');
   if (!clip.tracks || clip.tracks.length === 0) {
-    throw new Error(`Клип "${clip.name}" не содержит ни одного трека`);
+    throw new Error('нет ни одного трека');
   }
   if (!isFinite(clip.duration) || clip.duration <= 0) {
-    throw new Error(`Клип "${clip.name}" имеет некорректную длительность: ${clip.duration}`);
+    throw new Error(`некорректная длительность: ${clip.duration}`);
   }
 
   for (const track of clip.tracks) {
@@ -1127,23 +1352,42 @@ function validateClip(clip) {
     const values = track.values;
 
     if (!times || times.length === 0) {
-      throw new Error(`Трек "${track.name}" пуст`);
+      throw new Error(`трек "${track.name}" пуст`);
     }
     if (!values || values.length === 0) {
-      throw new Error(`Трек "${track.name}" не содержит значений`);
+      throw new Error(`трек "${track.name}" без значений`);
     }
-    for (let i = 0; i < times.length; i++) {
+
+    // Проверка размера массивов (должны быть кратны)
+    const comps = track.getValueSize ? track.getValueSize() : (values.length / times.length);
+    if (values.length % comps !== 0 || values.length / comps !== times.length) {
+      throw new Error(
+        `трек "${track.name}": размеры не соответствуют. ` +
+        `times: ${times.length}, values: ${values.length}, components: ${comps}`
+      );
+    }
+
+    // Проверяем на NaN/Infinity выборочно (не по всем — иначе сами зависнем)
+    const tStep = Math.max(1, Math.floor(times.length / 200));
+    for (let i = 0; i < times.length; i += tStep) {
       if (!isFinite(times[i])) {
-        throw new Error(`Трек "${track.name}": times[${i}] = ${times[i]}`);
-      }
-      if (i > 0 && times[i] < times[i - 1]) {
-        throw new Error(`Трек "${track.name}": times не монотонны на позиции ${i}`);
+        throw new Error(`трек "${track.name}": NaN/Infinity в times[${i}]`);
       }
     }
-    for (let i = 0; i < values.length; i++) {
+    const vStep = Math.max(1, Math.floor(values.length / 500));
+    for (let i = 0; i < values.length; i += vStep) {
       if (!isFinite(values[i])) {
-        throw new Error(`Трек "${track.name}": values[${i}] = ${values[i]}`);
+        throw new Error(`трек "${track.name}": NaN/Infinity в values[${i}]`);
       }
+    }
+
+    // Монотонность times
+    let lastT = -Infinity;
+    for (let i = 0; i < times.length; i++) {
+      if (times[i] < lastT) {
+        throw new Error(`трек "${track.name}": times не монотонны на позиции ${i}`);
+      }
+      lastT = times[i];
     }
   }
 }
