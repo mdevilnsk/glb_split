@@ -176,6 +176,18 @@ async function loadFile(file) {
   if (!file.name.match(/\.(glb|gltf)$/i)) {
     return setStatus('error', 'Только .glb или .gltf');
   }
+
+    // Проверка размера — предотвращаем подвисание браузера
+  const sizeMB = file.size / (1024 * 1024);
+  if (sizeMB > 80) {
+    const ok = confirm(
+      `Файл весит ${sizeMB.toFixed(0)} МБ.\n\n` +
+      `Парсинг такого файла может занять много памяти и времени. ` +
+      `Продолжить?`
+    );
+    if (!ok) return;
+  }
+
   currentFileName = file.name;
   setStatus('info', 'Загружаю...');
 
@@ -241,6 +253,15 @@ function renderAnimations() {
 
 function selectAnimation(index) {
   currentClip = animations[index];
+
+  try {
+    validateClip(currentClip);
+  } catch (err) {
+    console.error('Невалидный клип:', err);
+    setStatus('error', `Анимация повреждена: ${err.message}`);
+    return;
+  }
+  
   if (currentAction) currentAction.stop();
   currentAction = mixer.clipAction(currentClip);
   currentAction.setLoop(THREE.LoopOnce, 1);
@@ -932,6 +953,7 @@ async function trimAnimation(gltfAnim, startTime, endTime) {
     const sampler = channel.getSampler();
     if (!sampler) continue;
 
+    const interpolation = sampler.getInterpolation() || 'LINEAR';
     const inputAccessor = sampler.getInput();
     const outputAccessor = sampler.getOutput();
     if (!inputAccessor || !outputAccessor) continue;
@@ -940,7 +962,14 @@ async function trimAnimation(gltfAnim, startTime, endTime) {
     const values = outputAccessor.getArray();
     if (!times || !values || times.length === 0) continue;
 
-    const stride = outputAccessor.getElementSize();
+    const components = outputAccessor.getElementSize(); // 3 (vec3) или 4 (vec4)
+
+    // CUBICSPLINE: 3 набора по components на каждый keyframe (in-tangent, value, out-tangent)
+    // LINEAR/STEP: 1 набор по components на keyframe
+    const isCubic = interpolation === 'CUBICSPLINE';
+    const valuesPerKey = isCubic ? components * 3 : components;
+    const valueOffset = isCubic ? components : 0; // пропускаем in-tangent
+
     const newTimes = [];
     const newValues = [];
 
@@ -948,30 +977,79 @@ async function trimAnimation(gltfAnim, startTime, endTime) {
       const t = times[i];
       if (t >= startTime && t <= endTime) {
         newTimes.push(t - startTime);
-        for (let j = 0; j < stride; j++) {
-          newValues.push(values[i * stride + j]);
+        const baseIdx = i * valuesPerKey + valueOffset;
+        for (let j = 0; j < components; j++) {
+          newValues.push(values[baseIdx + j]);
         }
       }
     }
 
+    // Fallback: если ни один keyframe не попал в диапазон — берём ближайший
     if (newTimes.length === 0) {
       let closestIdx = 0;
       let minDiff = Infinity;
       for (let i = 0; i < times.length; i++) {
         const diff = Math.min(Math.abs(times[i] - startTime), Math.abs(times[i] - endTime));
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestIdx = i;
-        }
+        if (diff < minDiff) { minDiff = diff; closestIdx = i; }
       }
       newTimes.push(0);
-      for (let j = 0; j < stride; j++) {
-        newValues.push(values[closestIdx * stride + j]);
+      const baseIdx = closestIdx * valuesPerKey + valueOffset;
+      for (let j = 0; j < components; j++) {
+        newValues.push(values[baseIdx + j]);
       }
     }
 
-    inputAccessor.setArray(new Float32Array(newTimes));
-    outputAccessor.setArray(new Float32Array(newValues));
+    // Сортируем по времени (защита от невалидных данных)
+    const order = newTimes.map((_, i) => i).sort((a, b) => newTimes[a] - newTimes[b]);
+    const sortedTimes = order.map((i) => newTimes[i]);
+    const sortedValues = [];
+    for (const i of order) {
+      for (let k = 0; k < components; k++) {
+        sortedValues.push(newValues[i * components + k]);
+      }
+    }
+
+    // Удаляем дубликаты по времени (Three.js требует строгой монотонности)
+    const finalTimes = [];
+    const finalValues = [];
+    for (let i = 0; i < sortedTimes.length; i++) {
+      if (i > 0 && Math.abs(sortedTimes[i] - sortedTimes[i - 1]) < 1e-6) continue;
+      finalTimes.push(sortedTimes[i]);
+      for (let k = 0; k < components; k++) {
+        finalValues.push(sortedValues[i * components + k]);
+      }
+    }
+
+    // Защита от NaN / Infinity
+    for (let i = 0; i < finalTimes.length; i++) {
+      if (!isFinite(finalTimes[i])) finalTimes[i] = i * 0.033; // 30 fps fallback
+    }
+    for (let i = 0; i < finalValues.length; i++) {
+      if (!isFinite(finalValues[i])) finalValues[i] = 0;
+    }
+
+    // Для каналов rotation — нормализуем кватернионы
+    if (channel.getTargetPath() === 'rotation' && components === 4) {
+      for (let i = 0; i < finalValues.length; i += 4) {
+        const x = finalValues[i], y = finalValues[i + 1], z = finalValues[i + 2], w = finalValues[i + 3];
+        const len = Math.sqrt(x * x + y * y + z * z + w * w);
+        if (len > 1e-6) {
+          finalValues[i]     = x / len;
+          finalValues[i + 1] = y / len;
+          finalValues[i + 2] = z / len;
+          finalValues[i + 3] = w / len;
+        } else {
+          finalValues[i] = 0; finalValues[i + 1] = 0; finalValues[i + 2] = 0; finalValues[i + 3] = 1;
+        }
+      }
+    }
+
+    inputAccessor.setArray(new Float32Array(finalTimes));
+    outputAccessor.setArray(new Float32Array(finalValues));
+
+    // КРИТИЧНО: после нашей фильтрации тангиенты CUBICSPLINE невалидны.
+    // Переводим в LINEAR — Three.js корректно интерполирует линейно между ключами.
+    if (isCubic) sampler.setInterpolation('LINEAR');
   }
 }
 
@@ -1033,4 +1111,39 @@ function downloadBlob(blob, filename) {
 function setStatus(type, message) {
   statusEl.className = `visible ${type}`;
   statusEl.innerHTML = message;
+}
+
+function validateClip(clip) {
+  if (!clip) throw new Error('Клип отсутствует');
+  if (!clip.tracks || clip.tracks.length === 0) {
+    throw new Error(`Клип "${clip.name}" не содержит ни одного трека`);
+  }
+  if (!isFinite(clip.duration) || clip.duration <= 0) {
+    throw new Error(`Клип "${clip.name}" имеет некорректную длительность: ${clip.duration}`);
+  }
+
+  for (const track of clip.tracks) {
+    const times = track.times;
+    const values = track.values;
+
+    if (!times || times.length === 0) {
+      throw new Error(`Трек "${track.name}" пуст`);
+    }
+    if (!values || values.length === 0) {
+      throw new Error(`Трек "${track.name}" не содержит значений`);
+    }
+    for (let i = 0; i < times.length; i++) {
+      if (!isFinite(times[i])) {
+        throw new Error(`Трек "${track.name}": times[${i}] = ${times[i]}`);
+      }
+      if (i > 0 && times[i] < times[i - 1]) {
+        throw new Error(`Трек "${track.name}": times не монотонны на позиции ${i}`);
+      }
+    }
+    for (let i = 0; i < values.length; i++) {
+      if (!isFinite(values[i])) {
+        throw new Error(`Трек "${track.name}": values[${i}] = ${values[i]}`);
+      }
+    }
+  }
 }
