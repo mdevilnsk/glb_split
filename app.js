@@ -484,21 +484,40 @@ zoomFit.addEventListener('click', () => {
   timelineScroll.scrollLeft = 0;
 });
 
-timelineScroll.addEventListener(
-  'wheel',
-  (e) => {
-    if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-    const rect = timelineScroll.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left + timelineScroll.scrollLeft;
-    const timeBefore = (mouseX / track.clientWidth) * currentClip.duration;
-    applyZoom(zoom * factor);
-    const newMouseX = (timeBefore / currentClip.duration) * track.clientWidth;
-    timelineScroll.scrollLeft = newMouseX - (e.clientX - rect.left);
-  },
-  { passive: false }
-);
+// ============ ZOOM + SCROLL (Wheel + Trackpad) ============
+timelineScroll.addEventListener('wheel', (e) => {
+  const absX = Math.abs(e.deltaX);
+  const absY = Math.abs(e.deltaY);
+
+  // 1) Горизонтальный скролл: трекпад свайп влево/вправо ИЛИ Shift+колесо
+  //    Отдаём браузеру — стандартный overflow-x: auto делает своё дело
+  if (e.shiftKey || absX > absY * 1.5) {
+    return;
+  }
+
+  // 2) Вертикальный скролл (или pinch) → зум
+  if (!currentClip) return;
+
+  // Коэффициент зума
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  const newZoom = Math.max(1, Math.min(20, zoom * factor));
+
+  // Если уже на пределе — не перехватываем скролл,
+  // чтобы можно было прокрутить сайдбар
+  if (Math.abs(newZoom - zoom) < 0.0001) return;
+
+  e.preventDefault();
+
+  // Зум относительно позиции курсора (точка под мышкой остаётся на месте)
+  const rect = timelineScroll.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left + timelineScroll.scrollLeft;
+  const timeBefore = (mouseX / track.clientWidth) * currentClip.duration;
+
+  applyZoom(newZoom);
+
+  const newMouseX = (timeBefore / currentClip.duration) * track.clientWidth;
+  timelineScroll.scrollLeft = newMouseX - (e.clientX - rect.left);
+}, { passive: false });
 
 // ============ RULER ============
 function redrawRuler() {
