@@ -952,33 +952,88 @@ kbd {
 
 .tutorial-btn.ghost:hover { background: #3a3f4a; }
 
-/* Кнопка "?" в шапке */
-.help-btn {
-  background: #2d3139;
-  border: 1px solid #3a3f4a;
-  color: #c4b5fd;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  padding: 0;
-  transition: all 0.15s;
+/* ============ SIDEBAR HEADER (устойчиво к Safari) ============ */
+.sidebar-header {
+  display: flex !important;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid #2d3139;
   flex-shrink: 0;
-  -webkit-appearance: none;
+  flex-wrap: nowrap;
+}
+
+.sidebar-header-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ============ HELP BUTTON (жёсткий сброс стилей Safari) ============ */
+.help-btn {
+  /* Сброс ВСЕХ дефолтных стилей браузера */
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+
+  /* Размер и форма */
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  max-width: 26px;
+  max-height: 26px;
+  border-radius: 50%;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+
+  /* Внешний вид */
+  background: #2d3139 !important;
+  border: 1px solid #3a3f4a !important;
+  color: #c4b5fd !important;
+
+  /* Типографика */
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+
+  /* Выравнивание "?" по центру */
+  display: -webkit-inline-flex;
+  display: inline-flex;
+  -webkit-align-items: center;
+  align-items: center;
+  -webkit-justify-content: center;
+  justify-content: center;
+
+  /* Интерактив */
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+
+  /* Убираем тап-подсветку на мобильных */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
 }
 
 .help-btn:hover {
-  background: #7c5cff;
-  color: white;
-  border-color: #7c5cff;
+  background: #7c5cff !important;
+  color: #ffffff !important;
+  border-color: #7c5cff !important;
 }
 
-.sidebar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+.help-btn:active {
+  background: #6b4ce0 !important;
 }
 
-.sidebar-header-text { flex: 1; min-width: 0; }
+.help-btn:focus {
+  outline: none;
+}
+
+.help-btn:focus-visible {
+  outline: 2px solid #7c5cff;
+  outline-offset: 2px;
+}
