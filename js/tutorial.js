@@ -1,5 +1,5 @@
 // ============================================================================
-// tutorial.js — двухчастный обучающий оверлей с адаптацией под состояние UI
+// tutorial.js — двухчастный обучающий оверлей (кроссбраузерный)
 // ============================================================================
 
 import { dom } from './state.js';
@@ -8,107 +8,99 @@ const KEY_P1 = 'glb-editor-tutorial-p1-seen-v1';
 const KEY_P2 = 'glb-editor-tutorial-p2-seen-v1';
 
 // ---------------------------------------------------------------------------
-// Шаги. part = 1 → показываются всегда; part = 2 → только после загрузки файла
+// In-memory fallback (Safari Private Mode может блокировать localStorage)
+// ---------------------------------------------------------------------------
+const memoryStore = {};
+const store = {
+  get(key) {
+    try { return localStorage.getItem(key); }
+    catch (_) { return memoryStore[key] ?? null; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, value); }
+    catch (_) { memoryStore[key] = value; }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Шаги
 // ---------------------------------------------------------------------------
 const STEPS = [
-  // ---------- ЧАСТЬ 1 ----------
   {
-    part: 1,
-    id: 'intro',
+    part: 1, id: 'intro',
     title: '👋 Добро пожаловать!',
     text: 'Это редактор GLB-анимаций. Всё работает локально в браузере — файлы никуда не отправляются. Покажу за 30 секунд, как им пользоваться.',
   },
   {
-    part: 1,
-    id: 'dropzone',
-    target: '#dropzone',
-    placement: 'right',
+    part: 1, id: 'dropzone',
+    target: '#dropzone', placement: 'right',
     title: '📦 Загрузка файла',
     text: 'Перетащите .glb или .gltf сюда, либо нажмите на область. После загрузки модель появится в 3D-вьюпорте слева, а справа появятся инструменты таймлайна.',
   },
   {
-    part: 1,
-    id: 'footer',
-    target: '.sidebar-footer',
-    placement: 'left',
+    part: 1, id: 'footer',
+    target: '.sidebar-footer', placement: 'left',
     title: '💾 Экспорт',
     text: 'Здесь кнопки экспорта: собрать ZIP со всеми нарезанными фрагментами, скачать чистую модель без анимаций или сбросить текущий файл.',
   },
   {
-    part: 1,
-    id: 'done1',
+    part: 1, id: 'done1',
     title: '🎯 Первый шаг сделан',
     text: 'Отлично! Теперь перетащите любой .glb-файл в окно — покажу, как пользоваться таймлайном, зумом и нарезкой.',
   },
 
-  // ---------- ЧАСТЬ 2 ----------
   {
-    part: 2,
-    id: 'animations',
-    target: '#animations',
-    placement: 'right',
+    part: 2, id: 'animations',
+    target: '#animations', placement: 'right',
     title: '🎬 Выбор анимации',
     text: 'Список всех анимаций из файла. Кликните по нужной — она подгрузится в таймлайн, а модель примет позу первого кадра.',
   },
   {
-    part: 2,
-    id: 'timeline',
-    target: '#timelineScroll',
-    placement: 'right',
+    part: 2, id: 'timeline',
+    target: '#timelineScroll', placement: 'right',
     title: '⏱ Таймлайн',
     text: 'Красная линия — Playhead, текущий кадр. Тяните её мышкой, чтобы промотать вручную. Бирюзовые метки ◀ ▶ задают начало и конец выделения — они «прилипают» к Playhead и другим фрагментам.',
   },
   {
-    part: 2,
-    id: 'zoom',
-    target: '.zoom-row',
-    placement: 'right',
+    part: 2, id: 'zoom',
+    target: '.zoom-row', placement: 'right',
     title: '🔍 Зум',
-    text: 'Зум от 1x до 20x. Колесо мышки над таймлайном или слайдер. Ctrl/Cmd + колесо — зум к позиции курсора. Горизонтальный свайп трекпада — прокрутка.',
+    text: 'Зум от 1x до 20x. Колесо мышки над таймлайном или слайдер. Ctrl/Cmd + колесо — зум к позиции курсора.',
   },
   {
-    part: 2,
-    id: 'playback',
-    target: '.playback-row',
-    placement: 'right',
+    part: 2, id: 'playback',
+    target: '.playback-row', placement: 'right',
     title: '▶ Воспроизведение',
     text: 'Play или Пробел — воспроизведение начнётся с метки Start и остановится на End. Слайдер справа — скорость от 0.1x до 2x.',
   },
   {
-    part: 2,
-    id: 'segments',
-    target: '.segment-editor',
-    placement: 'right',
+    part: 2, id: 'segments',
+    target: '.segment-editor', placement: 'right',
     title: '✂️ Создание фрагмента',
-    text: 'Выделите кусок ползунками, введите имя файла и нажмите «+ Добавить фрагмент». Можно создать сколько угодно фрагментов на одной анимации, а потом экспортировать их одним ZIP-архивом.',
+    text: 'Выделите кусок ползунками, введите имя файла и нажмите «+ Добавить фрагмент». Потом можно экспортировать все фрагменты одним ZIP-архивом.',
   },
   {
-    part: 2,
-    id: 'done2',
+    part: 2, id: 'done2',
     title: '🎉 Готово!',
     text: 'Теперь вы знаете всё, что нужно. Если что-то забудете — нажмите «?» в шапке панели, туториал запустится снова.',
   },
 ];
 
 // ---------------------------------------------------------------------------
-// Внутреннее состояние
+// Состояние
 // ---------------------------------------------------------------------------
 let currentSteps = [];
 let currentStep = 0;
 let currentPart = null;
 let overlay = null;
+let resizeHandler = null;
+let keyHandler = null;
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-
-/**
- * Показать туториал.
- * @param {1|2|'all'} part — какую часть показать.
- */
 export function showTutorial(part = 'all') {
   if (part === 'all') {
-    // Если файл загружен — показываем всё. Иначе — только часть 1.
     const hasFile = !!document.querySelector('.anim-item');
     currentSteps = STEPS.filter((s) => s.part === 1 || (s.part === 2 && hasFile));
     currentPart = hasFile ? 'all' : 1;
@@ -123,7 +115,7 @@ export function showTutorial(part = 'all') {
     currentPart = 'all';
   }
 
-  // Дополнительная фильтрация: если target невидим — пропускаем шаг
+  // Пропускаем шаги, у которых target невидим
   currentSteps = currentSteps.filter((step) => {
     if (!step.target) return true;
     const el = document.querySelector(step.target);
@@ -131,40 +123,27 @@ export function showTutorial(part = 'all') {
   });
 
   if (currentSteps.length === 0) return;
-
   currentStep = 0;
   createOverlay();
   renderStep();
 }
 
-/**
- * Вызывается один раз при старте приложения.
- * Показывает часть 1, если она ещё не была просмотрена.
- */
 export function maybeShowTutorialOnFirstLaunch() {
-  try {
-    if (!localStorage.getItem(KEY_P1)) {
-      setTimeout(() => showTutorial(1), 500);
-    }
-  } catch (_) {}
+  if (!store.get(KEY_P1)) {
+    setTimeout(() => showTutorial(1), 500);
+  }
 }
 
-/**
- * Вызывается из file-loader.js после успешной загрузки файла.
- * Если часть 1 уже пройдена, а часть 2 — нет, автоматически показывает часть 2.
- */
 export function onFileLoaded() {
-  try {
-    const p1 = localStorage.getItem(KEY_P1);
-    const p2 = localStorage.getItem(KEY_P2);
-    if (p1 && !p2) {
-      setTimeout(() => showTutorial(2), 600);
-    }
-  } catch (_) {}
+  const p1 = store.get(KEY_P1);
+  const p2 = store.get(KEY_P2);
+  if (p1 && !p2) {
+    setTimeout(() => showTutorial(2), 600);
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Внутренние функции
+// Вспомогательные
 // ---------------------------------------------------------------------------
 function isElementVisible(el) {
   if (!el) return false;
@@ -180,8 +159,14 @@ function createOverlay() {
 
   overlay = document.createElement('div');
   overlay.className = 'tutorial-overlay';
+  // Четыре прямоугольника-затемнителя + рамка-подсветка + тултип.
+  // Этот подход работает одинаково во всех браузерах, включая Safari.
   overlay.innerHTML = `
-    <div class="tutorial-spotlight" id="tutSpotlight"></div>
+    <div class="tut-backdrop tut-backdrop-top"></div>
+    <div class="tut-backdrop tut-backdrop-bottom"></div>
+    <div class="tut-backdrop tut-backdrop-left"></div>
+    <div class="tut-backdrop tut-backdrop-right"></div>
+    <div class="tut-highlight" id="tutHighlight"></div>
     <div class="tutorial-tooltip" id="tutTooltip">
       <div class="tutorial-step-info">
         <span id="tutStepCounter"></span>
@@ -210,39 +195,73 @@ function createOverlay() {
     else closeTutorial();
   });
 
-  window.addEventListener('resize', renderStep);
-  window.addEventListener('keydown', tutorialKeyHandler);
-}
+  resizeHandler = () => renderStep();
+  keyHandler = (e) => {
+    if (e.key === 'Escape') closeTutorial();
+    else if (e.key === 'ArrowRight' || e.key === 'Enter') {
+      if (currentStep < currentSteps.length - 1) { currentStep++; renderStep(); }
+      else closeTutorial();
+    } else if (e.key === 'ArrowLeft') {
+      if (currentStep > 0) { currentStep--; renderStep(); }
+    }
+  };
 
-function tutorialKeyHandler(e) {
-  if (e.key === 'Escape') closeTutorial();
-  else if (e.key === 'ArrowRight' || e.key === 'Enter') {
-    if (currentStep < currentSteps.length - 1) { currentStep++; renderStep(); }
-    else closeTutorial();
-  } else if (e.key === 'ArrowLeft') {
-    if (currentStep > 0) { currentStep--; renderStep(); }
-  }
+  window.addEventListener('resize', resizeHandler);
+  window.addEventListener('keydown', keyHandler);
 }
 
 function closeTutorial() {
-  // Запоминаем, что соответствующая часть просмотрена
-  try {
-    if (currentPart === 1 || currentPart === 'all') localStorage.setItem(KEY_P1, '1');
-    if (currentPart === 2 || currentPart === 'all') localStorage.setItem(KEY_P2, '1');
-  } catch (_) {}
+  if (currentPart === 1 || currentPart === 'all') store.set(KEY_P1, '1');
+  if (currentPart === 2 || currentPart === 'all') store.set(KEY_P2, '1');
 
-  window.removeEventListener('resize', renderStep);
-  window.removeEventListener('keydown', tutorialKeyHandler);
+  if (resizeHandler) window.removeEventListener('resize', resizeHandler);
+  if (keyHandler) window.removeEventListener('keydown', keyHandler);
   if (overlay) { overlay.remove(); overlay = null; }
 }
 
+// ---------------------------------------------------------------------------
+// Позиционирование бэкдропов вокруг подсвеченного прямоугольника
+// ---------------------------------------------------------------------------
+function positionBackdrops(rect) {
+  const top    = overlay.querySelector('.tut-backdrop-top');
+  const bottom = overlay.querySelector('.tut-backdrop-bottom');
+  const left   = overlay.querySelector('.tut-backdrop-left');
+  const right  = overlay.querySelector('.tut-backdrop-right');
+
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  // Если rect == null — покрываем весь экран (режим "без подсветки")
+  if (!rect) {
+    top.style.cssText    = `left:0; top:0; width:${vw}px; height:${vh}px;`;
+    bottom.style.cssText = `display:none;`;
+    left.style.cssText   = `display:none;`;
+    right.style.cssText  = `display:none;`;
+    return;
+  }
+
+  const { x, y, w, h } = rect;
+
+  // Верх: от 0 до y
+  top.style.cssText = `left:0; top:0; width:${vw}px; height:${Math.max(0, y)}px;`;
+  // Низ: от y+h до низа экрана
+  bottom.style.cssText = `left:0; top:${y + h}px; width:${vw}px; height:${Math.max(0, vh - (y + h))}px;`;
+  // Лево: от y до y+h, от 0 до x
+  left.style.cssText = `left:0; top:${y}px; width:${Math.max(0, x)}px; height:${h}px;`;
+  // Право: от y до y+h, от x+w до правого края
+  right.style.cssText = `left:${x + w}px; top:${y}px; width:${Math.max(0, vw - (x + w))}px; height:${h}px;`;
+}
+
+// ---------------------------------------------------------------------------
+// Рендер шага
+// ---------------------------------------------------------------------------
 function renderStep() {
   if (!overlay) return;
 
   const step = currentSteps[currentStep];
   if (!step) return closeTutorial();
 
-  const spotlight = document.getElementById('tutSpotlight');
+  const highlight = document.getElementById('tutHighlight');
   const tooltip = document.getElementById('tutTooltip');
   const counter = document.getElementById('tutStepCounter');
 
@@ -254,21 +273,13 @@ function renderStep() {
   document.getElementById('tutNext').textContent =
     currentStep === currentSteps.length - 1 ? 'Начать!' : 'Далее →';
 
-  // -------------------------------------------------------------------------
-  // Режим "только затемнение" (первый/последний шаг или невидимый target)
-  // -------------------------------------------------------------------------
-  const isBackdropMode = !step.target;
   const el = step.target ? document.querySelector(step.target) : null;
+  const needHighlight = el && isElementVisible(el);
 
-  if (isBackdropMode || !el || !isElementVisible(el)) {
-    // Спотлайт 0×0 в позиции (0,0) — box-shadow покрывает весь экран
-    spotlight.style.display = 'block';
-    spotlight.style.left = '-1px';
-    spotlight.style.top = '-1px';
-    spotlight.style.width = '0px';
-    spotlight.style.height = '0px';
-    spotlight.style.border = 'none';
-    spotlight.style.borderRadius = '0';
+  // -------- Режим "полное затемнение" (нет target) --------
+  if (!needHighlight) {
+    highlight.style.display = 'none';
+    positionBackdrops(null);
 
     tooltip.classList.add('centered');
     tooltip.style.left = '';
@@ -276,24 +287,31 @@ function renderStep() {
     return;
   }
 
-  // -------------------------------------------------------------------------
-  // Обычный режим с подсветкой
-  // -------------------------------------------------------------------------
+  // -------- Режим с подсветкой --------
   tooltip.classList.remove('centered');
 
-  const rect = el.getBoundingClientRect();
-  const pad = 8;
+  const elRect = el.getBoundingClientRect();
+  const pad = 6;
 
-  // Спотлайт
-  spotlight.style.display = 'block';
-  spotlight.style.left = `${rect.left - pad}px`;
-  spotlight.style.top = `${rect.top - pad}px`;
-  spotlight.style.width = `${rect.width + pad * 2}px`;
-  spotlight.style.height = `${rect.height + pad * 2}px`;
-  spotlight.style.border = '2px solid #7c5cff';
-  spotlight.style.borderRadius = '10px';
+  // Координаты вырезанной области
+  const hole = {
+    x: Math.max(0, elRect.left - pad),
+    y: Math.max(0, elRect.top - pad),
+    w: elRect.width + pad * 2,
+    h: elRect.height + pad * 2,
+  };
 
-  // Тултип — нужно сначала измерить его высоту, поэтому временно показываем
+  // Позиционируем бэкдропы
+  positionBackdrops(hole);
+
+  // Рамка-подсветка вокруг выреза
+  highlight.style.display = 'block';
+  highlight.style.left = `${hole.x}px`;
+  highlight.style.top = `${hole.y}px`;
+  highlight.style.width = `${hole.w}px`;
+  highlight.style.height = `${hole.h}px`;
+
+  // Позиционируем тултип — сначала сброс, потом измеряем, потом ставим
   tooltip.style.left = '0px';
   tooltip.style.top = '0px';
 
@@ -304,18 +322,18 @@ function renderStep() {
   const placement = step.placement || 'right';
 
   if (placement === 'right') {
-    left = rect.right + gap;
-    top = rect.top + rect.height / 2 - ttRect.height / 2;
+    left = hole.x + hole.w + gap;
+    top = hole.y + hole.h / 2 - ttRect.height / 2;
     if (left + ttRect.width > window.innerWidth - 16) {
-      left = rect.left - gap - ttRect.width;
+      left = hole.x - gap - ttRect.width;
     }
   } else if (placement === 'left') {
-    left = rect.left - gap - ttRect.width;
-    if (left < 16) left = rect.right + gap;
-    top = rect.top + rect.height / 2 - ttRect.height / 2;
+    left = hole.x - gap - ttRect.width;
+    if (left < 16) left = hole.x + hole.w + gap;
+    top = hole.y + hole.h / 2 - ttRect.height / 2;
   } else if (placement === 'bottom') {
-    left = rect.left + rect.width / 2 - ttRect.width / 2;
-    top = rect.bottom + gap;
+    left = hole.x + hole.w / 2 - ttRect.width / 2;
+    top = hole.y + hole.h + gap;
   }
 
   left = Math.max(16, Math.min(left, window.innerWidth - ttRect.width - 16));

@@ -827,18 +827,34 @@ kbd {
 
 /* ============ TUTORIAL ============ */
 .tutorial-overlay {
-  position: fixed; inset: 0; z-index: 9999;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   pointer-events: none;
 }
-.tutorial-spotlight {
+
+/* 4 прямоугольника, образующие «рамку» затемнения вокруг выреза.
+   Работает во всех браузерах, включая Safari, без лимитов box-shadow. */
+.tut-backdrop {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.78);
+  pointer-events: auto;
+  transition: top 0.2s ease, left 0.2s ease,
+              width 0.2s ease, height 0.2s ease;
+}
+
+/* Рамка-подсветка вокруг выреза */
+.tut-highlight {
   position: fixed;
   pointer-events: none;
-  transition: left 0.25s ease, top 0.25s ease,
-              width 0.25s ease, height 0.25s ease;
-  /* box-shadow формирует затемнение вокруг вырезанной области */
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.78);
-  background: transparent;
+  border: 2px solid #7c5cff;
+  border-radius: 10px;
+  box-shadow: 0 0 12px rgba(124, 92, 255, 0.5);
+  transition: top 0.2s ease, left 0.2s ease,
+              width 0.2s ease, height 0.2s ease;
+  z-index: 1;
 }
+
 .tutorial-tooltip {
   position: fixed;
   width: 340px;
@@ -850,54 +866,90 @@ kbd {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
   pointer-events: auto;
   transition: left 0.2s ease, top 0.2s ease;
-  z-index: 1;
+  z-index: 2;
 }
+
 .tutorial-tooltip.centered {
   left: 50% !important;
   top: 50% !important;
+  -webkit-transform: translate(-50%, -50%);
   transform: translate(-50%, -50%);
   transition: none;
 }
+
 .tutorial-step-info {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 10px;
 }
+
 #tutStepCounter {
-  font-size: 11px; color: #6b7280; font-family: monospace; font-weight: 600;
+  font-size: 11px;
+  color: #6b7280;
+  font-family: monospace;
+  font-weight: 600;
 }
+
 .tutorial-close {
-  background: transparent; border: none;
-  color: #6b7280; font-size: 16px; cursor: pointer;
-  padding: 0 4px; line-height: 1;
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
   transition: color 0.15s;
 }
+
 .tutorial-close:hover { color: #e8eaed; }
+
 .tutorial-title {
-  font-size: 16px; font-weight: 700;
-  color: #e8eaed; margin-bottom: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #e8eaed;
+  margin-bottom: 8px;
 }
+
 .tutorial-text {
-  font-size: 13px; line-height: 1.55;
-  color: #b8bcc4; margin-bottom: 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #b8bcc4;
+  margin-bottom: 18px;
 }
+
 .tutorial-actions {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 8px;
 }
+
 .tutorial-nav { display: flex; gap: 6px; }
+
 .tutorial-btn {
-  padding: 8px 14px; border-radius: 8px; border: none;
-  font-size: 12px; font-weight: 600; cursor: pointer;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
   transition: all 0.15s;
+  -webkit-appearance: none;
 }
+
 .tutorial-btn.primary {
   background: linear-gradient(90deg, #7c5cff, #6366f1);
   color: white;
 }
+
 .tutorial-btn.primary:hover { filter: brightness(1.15); }
+
 .tutorial-btn.ghost {
-  background: #2d3139; color: #e8eaed;
+  background: #2d3139;
+  color: #e8eaed;
 }
+
 .tutorial-btn.ghost:hover { background: #3a3f4a; }
 
 /* Кнопка "?" в шапке */
@@ -905,19 +957,28 @@ kbd {
   background: #2d3139;
   border: 1px solid #3a3f4a;
   color: #c4b5fd;
-  width: 24px; height: 24px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  font-size: 12px; font-weight: 700;
-  cursor: pointer; padding: 0;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
   transition: all 0.15s;
   flex-shrink: 0;
+  -webkit-appearance: none;
 }
+
 .help-btn:hover {
   background: #7c5cff;
   color: white;
   border-color: #7c5cff;
 }
+
 .sidebar-header {
-  display: flex; justify-content: space-between; align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
 }
+
 .sidebar-header-text { flex: 1; min-width: 0; }
